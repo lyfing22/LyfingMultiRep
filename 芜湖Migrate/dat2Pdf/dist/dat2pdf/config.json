@@ -1,0 +1,7 @@
+{
+  "root": "D:\\Migrate\\Report_Data",
+  "exe_dir": "dat2Img",
+  "exe_name": "ConvertReport2Image.exe",
+  "max_rows": 10000,
+  "timeout_sec": 120
+}
