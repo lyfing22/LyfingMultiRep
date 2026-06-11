@@ -24,8 +24,8 @@ migrateWH/DataMigrate/
     │
     ├── Sources/
     │   └── Oracle/
-    │       ├── OracleSource.cs
-    │       └── OracleRecord.cs
+    │       ├── NeusoftSource.cs
+    │       └── NeusoftRecord.cs
     │
     ├── Upload/
     │   ├── ArchiveUploader.cs
@@ -49,7 +49,7 @@ migrateWH/DataMigrate/
 | 模式 | 位置 | 说明 |
 |------|------|------|
 | **Strategy** | `IMigrationSource` | 不同厂商不同的查询/构建策略 |
-| **Facade** | `OracleSource` | 对 Engine 屏蔽 Oracle 内部细节 |
+| **Facade** | `NeusoftSource` | 对 Engine 屏蔽东软 PACS 内部细节 |
 | **Template Method** | `MigrationEngine.RunAsync()` | 固定流程骨架 |
 | **Factory** | .NET 8 Keyed DI | 按 `appsettings.SourceType` 创建对应 Source |
 | **Options** | `MigrationOptions` | 强类型配置验证 |

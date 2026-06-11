@@ -26,7 +26,7 @@ dotnet run --project .\DataMigrate\DataMigrate.csproj
 
 ## 架构要点
 
-- **Strategy 模式**：`IMigrationSource` 接口，当前仅 `OracleSource` 实现，通过 .NET 8 Keyed DI 按 `SourceType` 注入
+- **Strategy 模式**：`IMigrationSource` 接口，当前仅 `NeusoftSource` 实现，通过 .NET 8 Keyed DI 按 `SourceType` 注入
 - **Producer-Consumer**：`Channel<MigrateArchive>` 有界队列（容量 = PageSize × 2），N 个消费者并行 HTTP 上传（`Parallelism` 配置，默认 4）
 - **零重试策略**：上传失败直接写入 `ZTemp_MigrateError` 表，人工后处理
 - **确定性的 GUID**：`GenerateGuid()` = `MD5(AccessionNumber)`，同一条检查号始终生成相同 ID（用于 MongoDB _id）
@@ -48,8 +48,8 @@ DataMigrate/
 │   ├── MigrationEngine.cs             # Producer-Consumer 核心引擎
 │   └── MigrationOptions.cs            # 强类型配置模型
 ├── Sources/Oracle/
-│   ├── OracleSource.cs                # Oracle 分页查询 + Archive 构建
-│   └── OracleRecord.cs                # SQL 查询 DTO（字段名必须与 SQL AS 别名一致）
+│   ├── NeusoftSource.cs                # 东软 PACS 分页查询 + Archive 构建
+│   └── NeusoftRecord.cs                # SQL 查询 DTO（字段名必须与 SQL AS 别名一致）
 ├── Upload/
 │   ├── ArchiveUploader.cs             # HTTP POST + ZTemp 批量缓冲
 │   └── JwtTokenManager.cs             # Timer 自动刷新 JWT token
@@ -65,8 +65,8 @@ DataMigrate/
 
 ## 关键约定
 
-- `OracleRecord` 属性名必须与 SQL 中 `AS` 别名 **完全一致**，否则 Dapper 映射失败
-- 添加新数据源需：实现 `IMigrationSource` → 在 `Program.cs` 用 `AddKeyedSingleton<IMigrationSource, XxxSource>("Xxx")` 注册
+- `NeusoftRecord` 属性名必须与 SQL 中 `AS` 别名 **完全一致**，否则 Dapper 映射失败
+- 添加新数据源需：实现 `IMigrationSource` → 类名以 `{Key}Source` 命名（如 `HisPacsSource`）→ 自动注册，无需改 DI 代码
 - 日志文件写入 `logs/migrate-{yyyyMMdd}.log`，保留 30 天
 
 ## ⚠ 安全注意

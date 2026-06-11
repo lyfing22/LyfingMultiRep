@@ -44,7 +44,7 @@ public class PostMigrationAuditor
             await srcConn.OpenAsync();
             var sourceCount = await srcConn.QuerySingleAsync<int>(@"
                 SELECT COUNT(*) FROM PACS31.STUDYINFO
-                WHERE SEPERATETIME BETWEEN :start AND :end AND ISAVAILABLE=1",
+                WHERE SEPERATETIME >= :start AND SEPERATETIME < :end AND ISAVAILABLE=1",
                 new { start = range.Start, end = range.End });
             _logger.LogInformation("Oracle 源记录数: {Count}", sourceCount);
 

@@ -1,10 +1,6 @@
-namespace DataMigrate.Sources.Oracle;
+namespace DataMigrate.Sources.Neusoft;
 
-/// <summary>
-/// Oracle 联表查询的 DTO。属性名必须与 SQL 中 AS 别名完全一致（大小写不敏感），
-/// 否则 Dapper 无法映射到字段。
-/// </summary>
-public class OracleRecord
+public class NeusoftRecord
 {
     public string? GlobalPatientId { get; init; }
     public string? Name { get; init; }

@@ -1,7 +1,7 @@
+using System.Reflection;
 using System.Text;
 using DataMigrate.Infrastructure;
 using DataMigrate.Models;
-using DataMigrate.Sources.Oracle;
 using DataMigrate.Upload;
 using DataMigrate.Validation;
 using Microsoft.Extensions.Configuration;
@@ -53,6 +53,12 @@ internal static class BuildInfrastructure
             sp.GetRequiredService<ILogger<PostMigrationAuditor>>()));
 
         builder.Services.AddSingleton<ConsoleProgressBar>();
+        builder.Services.AddSingleton(sp =>
+        {
+            var options = sp.GetRequiredService<MigrationOptions>();
+            var source = sp.GetRequiredKeyedService<IMigrationSource>(options.SourceType);
+            return ActivatorUtilities.CreateInstance<MigrationRunner>(sp, source);
+        });
 
         // ── Typed HttpClient：连接池化管理，避免端口耗尽 ──
         builder.Services.AddHttpClient<ArchiveUploader>(client =>
@@ -66,8 +72,26 @@ internal static class BuildInfrastructure
             MaxConnectionsPerServer = options.Migration.Parallelism * 4
         });
 
-        // ── Keyed DI：将 OracleSource 绑定到 "Oracle" 键，与 appsettings.SourceType 对应 ──
-        builder.Services.AddKeyedSingleton<IMigrationSource, OracleSource>("Oracle");
+        // ── Keyed DI：自动扫描 IMigrationSource 实现，按类名去除 "Source" 后缀作为 key ──
+        var sourceTypes = typeof(BuildInfrastructure).Assembly
+            .GetTypes()
+            .Where(t => t is { IsClass: true, IsAbstract: false }
+                        && t.IsAssignableTo(typeof(IMigrationSource)));
+
+        var deps = new SourceDependencies(
+            options.ConnectionStrings.Source, options.Identity, options.ModalityDepartment);
+        builder.Services.AddSingleton(deps);
+
+        const string suffix = "Source";
+        foreach (var type in sourceTypes)
+        {
+            var key = type.Name.EndsWith(suffix, StringComparison.Ordinal)
+                ? type.Name[..^suffix.Length]
+                : type.Name;
+
+            builder.Services.AddKeyedSingleton<IMigrationSource>(key, (sp, _) =>
+                (IMigrationSource)ActivatorUtilities.CreateInstance(sp, type));
+        }
     }
 
     /// <summary>配置绑定：IConfiguration → 强类型 MigrationOptions</summary>

@@ -76,7 +76,7 @@ public class ArchiveUploader
             _buffer.Add((archive.Order.AccessionNumber, false, msg));
             await FlushIfNeededAsync();
             return new ArchiveUploadResult { Success = false, ErrorMessage = msg };
-        }
+        }        
     }
 
     /// <summary>将缓冲中的结果批量写入 ZTemp_MigrateError 表（MERGE 幂等写入）</summary>

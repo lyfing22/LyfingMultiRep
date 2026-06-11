@@ -3,8 +3,8 @@ namespace DataMigrate.Core;
 /// <summary>appsettings.json 的强类型映射，所有配置节一一对应</summary>
 public class MigrationOptions
 {
-    /// <summary>数据源类型，与 Keyed DI 键名一致。当前仅 "Oracle"</summary>
-    public string SourceType { get; init; } = "Oracle";
+    /// <summary>数据源类型，与 Keyed DI 键名一致。当前仅 "Neusoft"</summary>
+    public string SourceType { get; init; } = "Neusoft";
     public ConnectionStringsOption ConnectionStrings { get; init; } = new();
     public MigrationConfig Migration { get; init; } = new();
     public UploadConfig Upload { get; init; } = new();
@@ -29,16 +29,22 @@ public class MigrationConfig
 {
     /// <summary>
     /// 运行模式。合法值：
-    ///   batch    - 全量迁移（分页查 Oracle → Channel 队列 → 并行 HTTP 上传 → 审计）
-    ///   debug    - 单条调试（按 AccessionNumber 查一条 + 打印 JSON + 上传）
+    ///   batch    - 全量迁移（自动获取源库 min/max → 切割计划 → 并行执行 → 审计）
+    ///   debug    - 两种方式：AccessionNumber(单条) 或 TimeRange(分计划预演)
     ///   validate - MongoDB 验证（对比 Oracle 检查号是否都在 MongoDB 中存在）
     ///   audit    - 迁移后审计（对比 Oracle 源记录数与 MongoDB 目标记录数）
     /// </summary>
     public string Mode { get; init; } = "batch";
-    /// <summary>单条调试用的检查号（仅 debug/validate/audit 模式）</summary>
+    /// <summary>debug 模式：配置此项则查单条 + 打印 JSON + 上传；留空则使用 TimeRange 分计划迁移</summary>
     public string? AccessionNumber { get; init; }
-    /// <summary>时间窗口（所有模式均可用）</summary>
+    /// <summary>debug 模式（无 AccessionNumber 时）使用的时间窗口</summary>
     public DateRangeConfig TimeRange { get; init; } = new();
+    /// <summary>计划切割天数间隔（默认 1 天）</summary>
+    public int PlanIntervalDays { get; init; } = 1;
+    /// <summary>最大同时执行的计划数（默认 2）</summary>
+    public int MaxParallelPlans { get; init; } = 2;
+    /// <summary>计划执行顺序：descending（从新到旧）| ascending（从旧到新）</summary>
+    public string PlanOrder { get; init; } = "descending";
     /// <summary>Oracle 分页大小（默认 100）</summary>
     public int PageSize { get; init; } = 100;
     /// <summary>并行上传消费者数（默认 4）</summary>
@@ -89,3 +95,4 @@ public class IdentityConfig
 
 public record DateRange(DateTime Start, DateTime End);
 public record SourceMetadata(int EstimatedCount, DateTime? MinDate, DateTime? MaxDate);
+public record PlanInfo(Guid Id, DateRange Range);

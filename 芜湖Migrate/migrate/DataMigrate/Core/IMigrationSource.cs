@@ -2,7 +2,7 @@ using DataMigrate.Models;
 
 namespace DataMigrate.Core;
 
-/// <summary>数据源适配接口（Strategy 模式）：每种数据源（Oracle、SQL Server 等）各自实现</summary>
+/// <summary>数据源适配接口（Strategy 模式）：每种数据源厂商各自实现</summary>
 public interface IMigrationSource
 {
     string SourceName { get; }
@@ -12,6 +12,8 @@ public interface IMigrationSource
     Task<SourceMetadata> GetMetadataAsync(DateRange range);
     /// <summary>按检查号查询单条</summary>
     Task<MigrateArchive?> GetByAccessionNumberAsync(string accessionNumber);
+    /// <summary>获取源库 SEPERATETIME 的实际最小/最大时间</summary>
+    Task<DateRange> GetTimeRangeAsync();
     /// <summary>按时间范围分页枚举，用于全量迁移/验证</summary>
     IAsyncEnumerable<MigrateArchive> EnumerateArchivesAsync(
         DateRange range, int pageSize, CancellationToken ct);

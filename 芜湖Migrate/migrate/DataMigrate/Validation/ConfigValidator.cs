@@ -47,12 +47,16 @@ public class ConfigValidator
 
         // ── 根据模式校验必要参数 ──
         var mode = _options.Migration.Mode;
-        if (mode is "debug" or "validate" or "audit" && string.IsNullOrWhiteSpace(_options.Migration.AccessionNumber)
-            && (_options.Migration.TimeRange.Start == default || _options.Migration.TimeRange.End == default))
-            errors.Add("Debug/Validate/Audit 模式需配置 AccessionNumber 或 TimeRange");
+        if (mode is "debug")
+        {
+            var hasAccNum = !string.IsNullOrWhiteSpace(_options.Migration.AccessionNumber);
+            var hasTimeRange = _options.Migration.TimeRange.Start != default
+                               && _options.Migration.TimeRange.End != default;
+            if (!hasAccNum && !hasTimeRange)
+                errors.Add("Debug 模式需配置 AccessionNumber（单条）或 TimeRange（区间预演）");
+        }
 
-        if (mode is "batch" or "validate" or "audit" && (_options.Migration.TimeRange.Start == default || _options.Migration.TimeRange.End == default))
-            errors.Add("Batch/Validate/Audit 模式需配置 TimeRange");
+        // batch/validate/audit 不再依赖配置中的 TimeRange，改为从源库自动获取
 
         // ── SQL Server 连通性测试（ZTemp 追踪表需要） ──
         if (!string.IsNullOrWhiteSpace(_options.ConnectionStrings.Destination))

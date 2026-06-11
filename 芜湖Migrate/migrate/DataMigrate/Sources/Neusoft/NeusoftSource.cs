@@ -6,23 +6,24 @@ using DataMigrate.Infrastructure;
 using DataMigrate.Models;
 using Oracle.ManagedDataAccess.Client;
 
-namespace DataMigrate.Sources.Oracle;
+namespace DataMigrate.Sources.Neusoft;
 
-/// <summary>IMigrationSource 的 Oracle 实现：联表查询 PACS31 schema → 构建 MigrateArchive</summary>
-public class OracleSource : IMigrationSource
+/// <summary>
+/// 东软PACS数据源适配器：连接Oracle数据库，查询STUDYINFO等表构建迁移档案对象
+/// </summary>
+public class NeusoftSource : IMigrationSource
 {
     private readonly string _connStr;
     private readonly IdentityConfig _identity;
-    // 设备类型 → 执行科室映射（如 CT → 放射科）
     private readonly Dictionary<string, DeviceDptInfo> _modalityMap;
 
-    public string SourceName => "Oracle PACS";
+    public string SourceName => "Neusoft PACS";
 
-    public OracleSource(string connStr, IdentityConfig identity, Dictionary<string, DeviceDptInfo> modalityMap)
+    public NeusoftSource(SourceDependencies deps)
     {
-        _connStr = connStr;
-        _identity = identity;
-        _modalityMap = modalityMap;
+        _connStr = deps.ConnectionString;
+        _identity = deps.Identity;
+        _modalityMap = deps.ModalityDepartment;
     }
 
     public async Task ValidateAsync()
@@ -32,18 +33,17 @@ public class OracleSource : IMigrationSource
         await conn.QuerySingleAsync<int>("SELECT 1 FROM DUAL");
     }
 
-    /// <summary>按检查号查询单条（debug 模式用）</summary>
     public async Task<MigrateArchive?> GetByAccessionNumberAsync(string accessionNumber)
     {
         using var conn = new OracleConnection(_connStr);
         await conn.OpenAsync();
 
-        var row = await conn.QuerySingleOrDefaultAsync<OracleRecord>(@"
+        var row = await conn.QuerySingleOrDefaultAsync<NeusoftRecord>(@"
             SELECT
               s.STUDYID                          AS GlobalPatientId,
               p.PATIENTNAME                       AS Name,
               p.PatientSpellName                  AS SpellName,
-              CASE WHEN p.SEX='男' THEN 'M'      -- M=男/F=女/U=未知
+              CASE WHEN p.SEX='男' THEN 'M'
                    WHEN p.SEX='女' THEN 'F'
                    ELSE 'U' END                   AS Gender,
               p.BIRTHDAY                           AS DateOfBirth,
@@ -51,8 +51,8 @@ public class OracleSource : IMigrationSource
               p.Phonenumber                       AS Telephone,
               s.CHECKSERIALNUM                    AS AccessionNumber,
               s.SICKROOM                          AS BedNumber,
-              DECODE(p.hispatienttype,'1','OP','2','IH','OP') AS PatientType,  -- OP=门诊/IH=住院
-              CASE WHEN s.IFEMERGENCY=1 THEN '1' ELSE '3' END AS EmergencyDegree,  -- 1=急诊/3=普通
+              DECODE(p.hispatienttype,'1','OP','2','IH','OP') AS PatientType,
+              CASE WHEN s.IFEMERGENCY=1 THEN '1' ELSE '3' END AS EmergencyDegree,
               p.clinicpatientid                   AS ClinicalNumber,
               p.infeepatientid                    AS InpatientNumber,
               s.DIAGID                            AS HisOrderCode,
@@ -91,7 +91,25 @@ public class OracleSource : IMigrationSource
         return row != null ? BuildArchive(row) : null;
     }
 
-    /// <summary>获取时间范围内预估记录数</summary>
+    public async Task<DateRange> GetTimeRangeAsync()
+    {
+        using var conn = new OracleConnection(_connStr);
+        await conn.OpenAsync();
+
+        var min = await conn.QuerySingleAsync<DateTime?>(@"
+            SELECT MIN(s.SEPERATETIME)
+            FROM PACS31.STUDYINFO s
+            WHERE s.ISAVAILABLE = 1");
+        var max = await conn.QuerySingleAsync<DateTime?>(@"
+            SELECT MAX(s.SEPERATETIME)
+            FROM PACS31.STUDYINFO s
+            WHERE s.ISAVAILABLE = 1");
+
+        return min.HasValue && max.HasValue
+            ? new DateRange(min.Value, max.Value)
+            : throw new InvalidOperationException("源数据库 PACS31.STUDYINFO 中无有效数据");
+    }
+
     public async Task<SourceMetadata> GetMetadataAsync(DateRange range)
     {
         using var conn = new OracleConnection(_connStr);
@@ -100,16 +118,12 @@ public class OracleSource : IMigrationSource
         var count = await conn.QuerySingleAsync<int>(@"
             SELECT COUNT(*)
             FROM PACS31.STUDYINFO s
-            WHERE s.SEPERATETIME BETWEEN :start AND :end
+            WHERE s.SEPERATETIME >= :start AND s.SEPERATETIME < :end
               AND s.ISAVAILABLE = 1", new { start = range.Start, end = range.End });
 
         return new SourceMetadata(count, range.Start, range.End);
     }
 
-    /// <summary>
-    /// 按时间范围分页枚举（配合 MigrationEngine 的 Producer-Consumer 模式）。
-    /// 使用 Oracle 12c+ OFFSET FETCH 分页语法。
-    /// </summary>
     public async IAsyncEnumerable<MigrateArchive> EnumerateArchivesAsync(
         DateRange range, int pageSize, [EnumeratorCancellation] CancellationToken ct)
     {
@@ -121,12 +135,12 @@ public class OracleSource : IMigrationSource
 
         while (hasMore && !ct.IsCancellationRequested)
         {
-            var rows = (await conn.QueryAsync<OracleRecord>(@"
+            var rows = (await conn.QueryAsync<NeusoftRecord>(@"
                 SELECT
                   s.STUDYID                          AS GlobalPatientId,
                   p.PATIENTNAME                       AS Name,
                   p.PatientSpellName                  AS SpellName,
-                  CASE WHEN p.SEX='男' THEN 'M'      -- M=男/F=女/U=未知
+                  CASE WHEN p.SEX='男' THEN 'M'
                        WHEN p.SEX='女' THEN 'F'
                        ELSE 'U' END                   AS Gender,
                   p.BIRTHDAY                           AS DateOfBirth,
@@ -134,8 +148,8 @@ public class OracleSource : IMigrationSource
                   p.Phonenumber                       AS Telephone,
                   s.CHECKSERIALNUM                    AS AccessionNumber,
                   s.SICKROOM                          AS BedNumber,
-                  DECODE(p.hispatienttype,'1','OP','2','IH','OP') AS PatientType,  -- OP=门诊/IH=住院
-                  CASE WHEN s.IFEMERGENCY=1 THEN '1' ELSE '3' END AS EmergencyDegree,  -- 1=急诊/3=普通
+                  DECODE(p.hispatienttype,'1','OP','2','IH','OP') AS PatientType,
+                  CASE WHEN s.IFEMERGENCY=1 THEN '1' ELSE '3' END AS EmergencyDegree,
                   p.clinicpatientid                   AS ClinicalNumber,
                   p.infeepatientid                    AS InpatientNumber,
                   s.DIAGID                            AS HisOrderCode,
@@ -168,7 +182,7 @@ public class OracleSource : IMigrationSource
                 LEFT JOIN PACS31.PATIENTDIAGRPTINFO r    ON s.DIAGRPTID = r.DIAGRPTID
                 LEFT JOIN PACS31.DEVICETYPEINFO dt       ON s.DEVICETYPEID = dt.DevicetypeId
                 LEFT JOIN PACS31.PACS_STUDYINFO psi      ON s.CHECKSERIALNUM = psi.ACCESSIONNUMBER
-                WHERE s.SEPERATETIME BETWEEN :start AND :end
+                WHERE s.SEPERATETIME >= :start AND s.SEPERATETIME < :end
                   AND s.ISAVAILABLE = 1
                 ORDER BY s.SEPERATETIME
                 OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY",
@@ -186,10 +200,7 @@ public class OracleSource : IMigrationSource
         }
     }
 
-    // ─────── OracleRecord → MigrateArchive 映射 ───────
-
-    /// <summary>将 Oracle 查询行转换为迁移用的 Archive 对象</summary>
-    private MigrateArchive BuildArchive(OracleRecord r)
+    private MigrateArchive BuildArchive(NeusoftRecord r)
     {
         var (age, ageUnit, ageDisplay) = ParseAge(r.Age, r.AgeUnit);
 
@@ -197,15 +208,15 @@ public class OracleSource : IMigrationSource
         {
             Name = r.Name ?? "",
             SpellName = r.SpellName,
-            Gender = r.Gender ?? "U",   // M=男/F=女/U=未知
+            Gender = r.Gender ?? "U",
             Age = age,
-            AgeUnit = ageUnit,          // year/month/day/hour
-            AgeDisplay = ageDisplay,    // 如 "35岁"
+            AgeUnit = ageUnit,
+            AgeDisplay = ageDisplay,
             GlobalPatientId = r.GlobalPatientId,
             HisPatientId = r.GlobalPatientId,
             PatientIndex = r.GlobalPatientId != null ? $"HIS/{r.GlobalPatientId}" : null,
             DateOfBirth = r.DateOfBirth,
-            IDCardType = "01",          // 01=身份证
+            IDCardType = "01",
             Address = r.Address,
             Telephone = r.Telephone
         };
@@ -214,11 +225,11 @@ public class OracleSource : IMigrationSource
         {
             ClinicalNumber = r.ClinicalNumber,
             InpatientNumber = r.InpatientNumber,
-            PatientType = r.PatientType ?? "OP",   // OP=门诊/IH=住院
+            PatientType = r.PatientType ?? "OP",
             BedNumber = r.BedNumber,
-            EmergencyDegree = r.EmergencyDegree     // 1=急诊/3=普通
+            EmergencyDegree = r.EmergencyDegree
         };
-        // 根据 ModalityCode 查找对应的执行科室（如 CT → 放射科）
+
         string modalityCode = r.ModalityCode ?? "";
         string modalityName = modalityCode;
         string? execDeptCode = null;
@@ -247,7 +258,7 @@ public class OracleSource : IMigrationSource
             CheckInDoctorName = r.CheckInDoctorName,
             CheckInTime = r.ArriveTime,
             TotalFee = ParseFee(r.TotalFee) ?? 0,
-            Status = DetermineStatus(r),   // Arrived=已到检/Studyed=有影像/Reported=有报告
+            Status = DetermineStatus(r),
             IsMatch = !string.IsNullOrWhiteSpace(r.StudyInstanceUID),
             IsFromRIS = !string.IsNullOrWhiteSpace(r.HisOrderCode),
             DeviceCode = r.DeviceCode,
@@ -293,7 +304,6 @@ public class OracleSource : IMigrationSource
             FullStatus = "Verify"
         };
 
-        // Id = MD5(AccessionNumber) 保证同一检查号生成相同 GUID，用于 MongoDB _id
         var schedule = r.ScheduledDate.HasValue
             ? new ScheduleArchive { StartTime = r.ScheduledDate }
             : null;
@@ -314,12 +324,6 @@ public class OracleSource : IMigrationSource
         };
     }
 
-    // ─────── 辅助方法 ───────
-
-    /// <summary>
-    /// 解析 Oracle 年龄字段（数字+单位）→ (数值, 单位代码, 显示字符串)。
-    /// 单位映射：年→year / 月→month / 天→day / 小时→hour
-    /// </summary>
     private static (int?, string?, string?) ParseAge(string? age, string? ageUnit)
     {
         if (string.IsNullOrWhiteSpace(age) || !int.TryParse(age, out var ageVal))
@@ -337,13 +341,7 @@ public class OracleSource : IMigrationSource
         return (ageVal, unitCode, display);
     }
 
-    /// <summary>
-    /// 根据报告/影像状态确定检查状态：
-    ///   Arrived = 已到检但尚未做检查
-    ///   Studyed = 已有影像（StudyInstanceUID 非空）
-    ///   Reported = 已出报告（SubmitDoctorCode 非空）
-    /// </summary>
-    private static string DetermineStatus(OracleRecord r)
+    private static string DetermineStatus(NeusoftRecord r)
     {
         if (!string.IsNullOrWhiteSpace(r.SubmitDoctorCode))
             return "Reported";
