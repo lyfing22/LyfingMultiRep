@@ -45,8 +45,8 @@ public class MigrationConfig
     public int MaxParallelPlans { get; init; } = 2;
     /// <summary>计划执行顺序：descending（从新到旧）| ascending（从旧到新）</summary>
     public string PlanOrder { get; init; } = "descending";
-    /// <summary>Oracle 分页大小（默认 100）</summary>
-    public int PageSize { get; init; } = 100;
+    /// <summary>Channel 有界队列容量（默认 200），控制生产者背压阈值</summary>
+    public int ChannelCapacity { get; init; } = 200;
     /// <summary>并行上传消费者数（默认 4）</summary>
     public int Parallelism { get; init; } = 4;
     /// <summary>ZTemp_MigrateError 批量刷入批次大小（默认 100）</summary>

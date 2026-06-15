@@ -10,7 +10,7 @@ namespace DataMigrate.Core;
 
 /// <summary>
 /// Producer-Consumer 迁移引擎（单个计划执行单元）：
-/// 1 个生产者分页查 Oracle → Channel&lt;MigrateArchive&gt; 有界队列 → N 个消费者并行 HTTP 上传
+/// 1 个生产者查 Oracle → Channel&lt;MigrateArchive&gt; 有界队列 → N 个消费者并行 HTTP 上传
 /// 不再管理全局统计/进度/审计，这些由 MigrationRunner 统一控制。
 /// </summary>
 public class MigrationEngine
@@ -40,7 +40,7 @@ public class MigrationEngine
         _logger = logger;
         _planId = planId;
         _parallelism = options.Migration.Parallelism > 0 ? options.Migration.Parallelism : 4;
-        _channel = Channel.CreateBounded<MigrateArchive>(new BoundedChannelOptions(options.Migration.PageSize * 2)
+        _channel = Channel.CreateBounded<MigrateArchive>(new BoundedChannelOptions(options.Migration.ChannelCapacity)
         {
             FullMode = BoundedChannelFullMode.Wait
         });
@@ -101,7 +101,7 @@ public class MigrationEngine
 
     private async Task ProduceAsync(DateRange range, CancellationToken ct)
     {
-        await foreach (var archive in _source.EnumerateArchivesAsync(range, _options.Migration.PageSize, ct))
+        await foreach (var archive in _source.EnumerateArchivesAsync(range, ct))
         {
             await _channel.Writer.WriteAsync(archive, ct);
         }

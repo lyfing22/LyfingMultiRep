@@ -14,7 +14,7 @@ public interface IMigrationSource
     Task<MigrateArchive?> GetByAccessionNumberAsync(string accessionNumber);
     /// <summary>获取源库 SEPERATETIME 的实际最小/最大时间</summary>
     Task<DateRange> GetTimeRangeAsync();
-    /// <summary>按时间范围分页枚举，用于全量迁移/验证</summary>
+    /// <summary>按时间范围枚举所有记录（单计划单次查询，不分页）</summary>
     IAsyncEnumerable<MigrateArchive> EnumerateArchivesAsync(
-        DateRange range, int pageSize, CancellationToken ct);
+        DateRange range, CancellationToken ct);
 }

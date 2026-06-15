@@ -1,3 +1,4 @@
+using System.Data;
 using Dapper;
 using DataMigrate.Infrastructure;
 using DataMigrate.Models;
@@ -88,7 +89,7 @@ public class MigrationRunner
         var range = new DateRange(cfg.Start, cfg.End);
         _logger.LogInformation("调试模式(时间区间): {Start:yyyy-MM-dd HH:mm} ~ {End:yyyy-MM-dd HH:mm}, 将按计划切割迁移",
             range.Start, range.End);
-        await RunPlanBasedMigrationAsync(range);
+        await RunPlanBasedMigrationAsync(range, _options.Migration.DbFlag + "_DEBUG");
     }
 
     private async Task RunDebugSingleAsync(string accNum)
@@ -131,7 +132,7 @@ public class MigrationRunner
         var accNums = new List<string>();
 
         _logger.LogInformation("拉取检查号列表...");
-        await foreach (var archive in _source.EnumerateArchivesAsync(range, 1000, CancellationToken.None))
+        await foreach (var archive in _source.EnumerateArchivesAsync(range, CancellationToken.None))
             accNums.Add(archive.Order.AccessionNumber);
 
         _logger.LogInformation("共 {Count} 条, 开始 MongoDB 验证", accNums.Count);
@@ -150,14 +151,15 @@ public class MigrationRunner
 
     // ───────── 分计划迁移核心逻辑 ─────────
 
-    private async Task RunPlanBasedMigrationAsync(DateRange fullRange)
+    private async Task RunPlanBasedMigrationAsync(DateRange fullRange, string? dbFlagOverride = null)
     {
+        var dbFlag = dbFlagOverride ?? _options.Migration.DbFlag;
         var plans = SplitRange(fullRange, _options.Migration.PlanIntervalDays);
-        _logger.LogInformation("计划切割: 共 {Count} 个子计划, 间隔 {IntervalDays} 天",
-            plans.Count, _options.Migration.PlanIntervalDays);
+        _logger.LogInformation("计划切割: 共 {Count} 个子计划, 间隔 {IntervalDays} 天, DbFlag={DbFlag}",
+            plans.Count, _options.Migration.PlanIntervalDays, dbFlag);
 
         // 1. 批量写入 ZTemp_MigratePlan（status = Pending）
-        await BatchCreatePlanRecordsAsync(plans);
+        await BatchCreatePlanRecordsAsync(plans, dbFlag);
 
         // 2. 设置全局统计总数
         var totalMeta = await _source.GetMetadataAsync(fullRange);
@@ -174,12 +176,10 @@ public class MigrationRunner
         _progress.Start();
 
         // 5. 并发执行子计划
-        var parallelOpts = new ParallelOptions
+        await Parallel.ForEachAsync(sortedPlans, new ParallelOptions
         {
             MaxDegreeOfParallelism = _options.Migration.MaxParallelPlans
-        };
-
-        await Parallel.ForEachAsync(sortedPlans, parallelOpts, async (plan, ct) =>
+        }, async (plan, ct) =>
         {
             var engine = ActivatorUtilities.CreateInstance<MigrationEngine>(
                 _sp, _source, plan.Id);
@@ -221,31 +221,37 @@ public class MigrationRunner
         return plans;
     }
 
-    /// <summary>批量写入 ZTemp_MigratePlan 记录，初始 status = Pending</summary>
-    private async Task BatchCreatePlanRecordsAsync(List<PlanInfo> plans)
+    /// <summary>批量写入 ZTemp_MigratePlan 记录，初始 status = Pending（SqlBulkCopy 优化）</summary>
+    private async Task BatchCreatePlanRecordsAsync(List<PlanInfo> plans, string dbFlag)
     {
         try
         {
             using var conn = new SqlConnection(_options.ConnectionStrings.Destination);
             await conn.OpenAsync();
-            using var tx = conn.BeginTransaction();
 
+            var dt = new DataTable();
+            dt.Columns.Add("Id", typeof(Guid));
+            dt.Columns.Add("DbFlag", typeof(string));
+            dt.Columns.Add("TimeRangeStart", typeof(DateTime));
+            dt.Columns.Add("TimeRangeEnd", typeof(DateTime));
+            dt.Columns.Add("TotalRecords", typeof(int));
+            dt.Columns.Add("SuccessCount", typeof(int));
+            dt.Columns.Add("FailedCount", typeof(int));
+            dt.Columns.Add("Status", typeof(string));
+            dt.Columns.Add("CreatedAt", typeof(DateTime));
+
+            var now = DateTime.Now;
             foreach (var plan in plans)
             {
-                await conn.ExecuteAsync(@"
-INSERT INTO ZTemp_MigratePlan(Id, DbFlag, TimeRangeStart, TimeRangeEnd, TotalRecords, SuccessCount, FailedCount, Status, CreatedAt)
-VALUES (@Id, @DbFlag, @Start, @End, 0, 0, 0, 'Pending', GETDATE())",
-                    new
-                    {
-                        Id = plan.Id,
-                        DbFlag = _options.Migration.DbFlag,
-                        Start = plan.Range.Start,
-                        End = plan.Range.End
-                    }, tx);
+                dt.Rows.Add(plan.Id, dbFlag, plan.Range.Start, plan.Range.End,
+                            0, 0, 0, "Pending", now);
             }
 
-            tx.Commit();
-            _logger.LogInformation("已写入 {Count} 条计划记录", plans.Count);
+            using var bulk = new SqlBulkCopy(conn);
+            bulk.DestinationTableName = "ZTemp_MigratePlan";
+            await bulk.WriteToServerAsync(dt);
+
+            _logger.LogInformation("已写入 {Count} 条计划记录, DbFlag={DbFlag}", plans.Count, dbFlag);
         }
         catch (Exception ex)
         {
