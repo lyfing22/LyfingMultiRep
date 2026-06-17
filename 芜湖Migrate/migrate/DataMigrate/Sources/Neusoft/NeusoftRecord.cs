@@ -3,12 +3,15 @@ namespace DataMigrate.Sources.Neusoft;
 public class NeusoftRecord
 {
     public string? GlobalPatientId { get; init; }
+    /// <summary>社保号</summary>
+    public string SocietyNumber { get; set; }
     public string? Name { get; init; }
     public string? SpellName { get; init; }
     public string? Gender { get; init; }
     public DateTime? DateOfBirth { get; init; }
     public string? Address { get; init; }
     public string? Telephone { get; init; }
+    public string Email { get; set; }
     public string IDCard { get; set; }
     public string AccessionNumber { get; init; }
     public string? BedNumber { get; init; }
@@ -21,6 +24,9 @@ public class NeusoftRecord
     public string DiseaseHistory { get; set; }
     public string Sign { get; set; }
     public string HisExamName { get; set; }
+
+    /// <summary>HIS 申请单申请日期</summary>
+    public DateTime? HisRequestDate { get; set; }
     public string? HisOrderCode { get; init; }
     public string? TotalFee { get; init; }
     public string? Age { get; init; }
